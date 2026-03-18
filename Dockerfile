@@ -3,11 +3,11 @@ FROM rust:1.88-bullseye AS builder
 
 WORKDIR /app
 
-# Cache dependencies
+# Copy manifests
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo fetch
+COPY src ./src
 RUN cargo build --release
-RUN rm -rf src
 
 # Copy real source and build
 COPY src ./src
