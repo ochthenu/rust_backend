@@ -3,22 +3,20 @@ FROM rust:1.88-bullseye AS builder
 
 WORKDIR /app
 
-# Copy everything (NO caching tricks)
 COPY . .
 
-# Force clean rebuild (this is key)
 RUN cargo clean
 RUN cargo build --release
 
 
-# 2) Runtime stage
-FROM debian:bookworm-slim
+# 2) Runtime stage (MATCH bullseye)
+FROM debian:bullseye-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl3 \
+    libssl1.1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/axum_backend /usr/local/bin/axum_backend
