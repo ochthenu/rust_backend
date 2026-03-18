@@ -3,10 +3,22 @@ FROM rust:1.88-bullseye AS builder
 
 WORKDIR /app
 
-# Copy manifests
+# Cache dependencies properly
 COPY Cargo.toml Cargo.lock ./
-RUN cargo fetch
+
+# Create dummy main so Cargo is happy
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies (this layer will rebuild when Cargo.toml changes)
+RUN cargo build --release
+
+# Remove dummy source
+RUN rm -rf src
+
+# Copy real source
 COPY src ./src
+
+# Force rebuild of app (and re-link with updated deps/features)
 RUN cargo build --release
 
 # Copy real source and build
