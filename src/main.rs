@@ -5,16 +5,21 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{PgPool, Row};
 use tokio::net::TcpListener;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 
+use jsonwebtoken::{encode, EncodingKey, Header};
+
 use tower_http::cors::{CorsLayer, Any};
+
+const JWT_SECRET: &[u8] = b"super_secret_key_change_me";
 
 #[derive(Clone)]
 struct AppState {
@@ -40,14 +45,18 @@ struct UserResponse {
     name: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: usize,
+}
+
 #[tokio::main]
 async fn main() {
-    // Get DATABASE_URL
     let database_url =
         std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set");
 
-    // ✅ Retry loop for DB connection (important for Railway)
     let pool = loop {
         match PgPool::connect(&database_url).await {
             Ok(pool) => {
@@ -61,7 +70,6 @@ async fn main() {
         }
     };
 
-    // CORS configuration
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -128,15 +136,15 @@ async fn register(
 }
 
 //
-// LOGIN
+// LOGIN (✅ UPDATED WITH JWT)
 //
 async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<Json<serde_json::Value>, StatusCode> {
 
     let record = sqlx::query(
-        "SELECT password_hash FROM users WHERE email = $1"
+        "SELECT password_hash, name FROM users WHERE email = $1"
     )
     .bind(payload.email)
     .fetch_optional(&state.pool)
@@ -151,6 +159,7 @@ async fn login(
     };
 
     let password_hash: String = row.get("password_hash");
+    let username: String = row.get("name");
 
     let parsed_hash =
         PasswordHash::new(&password_hash)
@@ -162,7 +171,27 @@ async fn login(
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    Ok(StatusCode::OK)
+    // ⏰ 24 hour expiry
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() + 86400;
+
+    let claims = Claims {
+        sub: username,
+        exp: exp as usize,
+    };
+
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(JWT_SECRET),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(json!({
+        "token": token
+    })))
 }
 
 //
