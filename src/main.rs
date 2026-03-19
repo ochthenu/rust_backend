@@ -7,6 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use tokio::net::TcpListener;
+use std::time::Duration;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -41,12 +42,24 @@ struct UserResponse {
 
 #[tokio::main]
 async fn main() {
+    // Get DATABASE_URL
     let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set");
 
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to database");
+    // ✅ Retry loop for DB connection (important for Railway)
+    let pool = loop {
+        match PgPool::connect(&database_url).await {
+            Ok(pool) => {
+                println!("✅ Connected to database");
+                break pool;
+            }
+            Err(e) => {
+                eprintln!("❌ DB connection failed, retrying in 5s: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    };
 
     // CORS configuration
     let cors = CorsLayer::new()
@@ -66,7 +79,7 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("Server running at http://0.0.0.0:3000");
+    println!("🚀 Server running at http://0.0.0.0:3000");
 
     axum::serve(listener, app).await.unwrap();
 }
@@ -98,6 +111,8 @@ async fn register(
     .fetch_one(&state.pool)
     .await
     .map_err(|e| {
+        eprintln!("❌ Register error: {}", e);
+
         if let sqlx::Error::Database(db_err) = &e {
             if db_err.constraint() == Some("users_name_key") {
                 return StatusCode::CONFLICT;
@@ -126,7 +141,10 @@ async fn login(
     .bind(payload.email)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ Login query error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let Some(row) = record else {
         return Err(StatusCode::UNAUTHORIZED);
@@ -159,7 +177,10 @@ async fn list_users(
     )
     .fetch_all(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ List users error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let users = rows
         .into_iter()
@@ -184,7 +205,10 @@ async fn delete_user(
         .bind(id)
         .execute(&state.pool)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            eprintln!("❌ Delete user error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(StatusCode::OK)
 }
