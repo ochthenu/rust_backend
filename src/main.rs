@@ -19,11 +19,10 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 
 use tower_http::cors::{CorsLayer, Any};
 
-const JWT_SECRET: &[u8] = b"super_secret_key_change_me";
-
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
+    jwt_secret: String,
 }
 
 #[derive(Deserialize)]
@@ -53,10 +52,16 @@ struct Claims {
 
 #[tokio::main]
 async fn main() {
+    // 🔐 ENV VARS
     let database_url =
         std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set");
 
+    let jwt_secret =
+        std::env::var("JWT_SECRET")
+            .expect("JWT_SECRET must be set");
+
+    // ✅ Retry DB connection (Railway needs this)
     let pool = loop {
         match PgPool::connect(&database_url).await {
             Ok(pool) => {
@@ -64,12 +69,13 @@ async fn main() {
                 break pool;
             }
             Err(e) => {
-                eprintln!("❌ DB connection failed, retrying in 5s: {}", e);
+                eprintln!("❌ DB connection failed, retrying: {}", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
     };
 
+    // 🌐 CORS (keep open for now)
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -80,7 +86,7 @@ async fn main() {
         .route("/login", post(login))
         .route("/users", get(list_users))
         .route("/users/:id", delete(delete_user))
-        .with_state(AppState { pool })
+        .with_state(AppState { pool, jwt_secret })
         .layer(cors);
 
     let listener = TcpListener::bind("0.0.0.0:3000")
@@ -105,7 +111,10 @@ async fn register(
 
     let password_hash = argon2
         .hash_password(payload.password.as_bytes(), &salt)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|e| {
+            eprintln!("❌ Hash error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .to_string();
 
     let record = sqlx::query(
@@ -136,7 +145,7 @@ async fn register(
 }
 
 //
-// LOGIN (✅ UPDATED WITH JWT)
+// LOGIN (JWT)
 //
 async fn login(
     State(state): State<AppState>,
@@ -171,7 +180,7 @@ async fn login(
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    // ⏰ 24 hour expiry
+    // ⏰ Expiry: 24h
     let exp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -185,9 +194,12 @@ async fn login(
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
+        &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ JWT error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(json!({
         "token": token
@@ -201,15 +213,13 @@ async fn list_users(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, StatusCode> {
 
-    let rows = sqlx::query(
-        "SELECT id, name FROM users"
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        eprintln!("❌ List users error: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let rows = sqlx::query("SELECT id, name FROM users")
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| {
+            eprintln!("❌ List users error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let users = rows
         .into_iter()
@@ -235,7 +245,7 @@ async fn delete_user(
         .execute(&state.pool)
         .await
         .map_err(|e| {
-            eprintln!("❌ Delete user error: {}", e);
+            eprintln!("❌ Delete error: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
