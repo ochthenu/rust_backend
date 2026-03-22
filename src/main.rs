@@ -1,6 +1,6 @@
 use axum::{
     extract::{State, Json, Path},
-    http::StatusCode,
+    http::{StatusCode, HeaderMap},
     routing::{get, post, delete},
     Router,
 };
@@ -15,7 +15,7 @@ use argon2::{
     Argon2,
 };
 
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{encode, decode, EncodingKey, DecodingKey, Header, Validation};
 
 use tower_http::cors::{CorsLayer, Any};
 
@@ -52,7 +52,6 @@ struct Claims {
 
 #[tokio::main]
 async fn main() {
-    // 🔐 ENV VARS
     let database_url =
         std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set");
@@ -75,7 +74,6 @@ async fn main() {
         }
     };
 
-    // 🌐 CORS (keep open for now)
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -96,6 +94,31 @@ async fn main() {
     println!("🚀 Server running at http://0.0.0.0:3000");
 
     axum::serve(listener, app).await.unwrap();
+}
+
+//
+// 🔐 JWT VERIFY HELPER
+//
+fn verify_token(headers: &HeaderMap, secret: &str) -> Result<String, StatusCode> {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+
+    if !auth_header.starts_with("Bearer ") {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let token = auth_header.trim_start_matches("Bearer ").trim();
+
+    let decoded = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )
+    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    Ok(decoded.claims.sub)
 }
 
 //
@@ -129,12 +152,6 @@ async fn register(
     .await
     .map_err(|e| {
         eprintln!("❌ Register error: {}", e);
-
-        if let sqlx::Error::Database(db_err) = &e {
-            if db_err.constraint() == Some("users_name_key") {
-                return StatusCode::CONFLICT;
-            }
-        }
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -158,10 +175,7 @@ async fn login(
     .bind(payload.email)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| {
-        eprintln!("❌ Login query error: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let Some(row) = record else {
         return Err(StatusCode::UNAUTHORIZED);
@@ -201,25 +215,28 @@ async fn login(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(json!({
-        "token": token
-    })))
+    Ok(Json(json!({ "token": token })))
 }
 
 //
-// LIST USERS
+// 🔐 LIST USERS (PROTECTED)
 //
 async fn list_users(
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, StatusCode> {
+
+    let username = verify_token(&headers, &state.jwt_secret)?;
+
+    // 🔒 Only YOU allowed
+    if username != "nigel2" {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     let rows = sqlx::query("SELECT id, name FROM users")
         .fetch_all(&state.pool)
         .await
-        .map_err(|e| {
-            eprintln!("❌ List users error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let users = rows
         .into_iter()
@@ -233,21 +250,25 @@ async fn list_users(
 }
 
 //
-// DELETE USER
+// 🔐 DELETE USER (PROTECTED)
 //
 async fn delete_user(
+    headers: HeaderMap,
     Path(id): Path<i32>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, StatusCode> {
+
+    let username = verify_token(&headers, &state.jwt_secret)?;
+
+    if username != "nigel2" {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(id)
         .execute(&state.pool)
         .await
-        .map_err(|e| {
-            eprintln!("❌ Delete error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
 }
