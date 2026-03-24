@@ -60,7 +60,6 @@ async fn main() {
         std::env::var("JWT_SECRET")
             .expect("JWT_SECRET must be set");
 
-    // ✅ Retry DB connection (Railway needs this)
     let pool = loop {
         match PgPool::connect(&database_url).await {
             Ok(pool) => {
@@ -129,6 +128,8 @@ async fn register(
     Json(payload): Json<RegisterPayload>,
 ) -> Result<Json<UserResponse>, StatusCode> {
 
+    println!("📝 REGISTER HIT: {}", payload.email);
+
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
@@ -155,6 +156,8 @@ async fn register(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    println!("✅ USER REGISTERED");
+
     Ok(Json(UserResponse {
         id: record.get("id"),
         name: record.get("name"),
@@ -162,39 +165,56 @@ async fn register(
 }
 
 //
-// LOGIN (JWT)
+// LOGIN (FIXED + DEBUG)
 //
 async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
 
+    println!("🔥 LOGIN HIT: {}", payload.email);
+
     let record = sqlx::query(
         "SELECT password_hash, name FROM users WHERE email = $1"
     )
-    .bind(payload.email)
+    .bind(&payload.email)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ DB ERROR: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    println!("✅ DB QUERY DONE");
 
     let Some(row) = record else {
+        println!("❌ USER NOT FOUND");
         return Err(StatusCode::UNAUTHORIZED);
     };
 
     let password_hash: String = row.get("password_hash");
     let username: String = row.get("name");
 
-    let parsed_hash =
-        PasswordHash::new(&password_hash)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    println!("🔐 VERIFYING PASSWORD");
+
+    let parsed_hash = PasswordHash::new(&password_hash)
+        .map_err(|e| {
+            eprintln!("❌ HASH PARSE ERROR: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let argon2 = Argon2::default();
 
-    argon2
+    if argon2
         .verify_password(payload.password.as_bytes(), &parsed_hash)
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        .is_err()
+    {
+        println!("❌ INVALID PASSWORD");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
 
-    // ⏰ Expiry: 24h
+    println!("✅ PASSWORD VERIFIED");
+
     let exp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -205,21 +225,25 @@ async fn login(
         exp: exp as usize,
     };
 
+    println!("🔑 GENERATING TOKEN");
+
     let token = encode(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
     )
     .map_err(|e| {
-        eprintln!("❌ JWT error: {}", e);
+        eprintln!("❌ JWT ERROR: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    println!("✅ LOGIN SUCCESS");
 
     Ok(Json(json!({ "token": token })))
 }
 
 //
-// 🔐 LIST USERS (PROTECTED)
+// 🔐 LIST USERS
 //
 async fn list_users(
     headers: HeaderMap,
@@ -228,7 +252,6 @@ async fn list_users(
 
     let username = verify_token(&headers, &state.jwt_secret)?;
 
-    // 🔒 Only YOU allowed
     if username != "nigel2" {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -250,7 +273,7 @@ async fn list_users(
 }
 
 //
-// 🔐 DELETE USER (PROTECTED)
+// 🔐 DELETE USER
 //
 async fn delete_user(
     headers: HeaderMap,
