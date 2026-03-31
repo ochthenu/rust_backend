@@ -15,12 +15,7 @@ use argon2::{
     Argon2,
 };
 
-<<<<<<< HEAD
 use jsonwebtoken::{encode, decode, EncodingKey, DecodingKey, Header, Validation};
-
-=======
-use jsonwebtoken::{encode, EncodingKey, Header};
->>>>>>> 6c33cd7 (update main.rs debug)
 use tower_http::cors::{CorsLayer, Any};
 
 #[derive(Clone)]
@@ -58,12 +53,6 @@ struct Claims {
 async fn main() {
     println!("🚀 Starting backend (new version!) 🔥"); // <- DEBUG LINE
 
-<<<<<<< HEAD
-    let jwt_secret =
-        std::env::var("JWT_SECRET")
-            .expect("JWT_SECRET must be set");
-
-=======
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
@@ -71,7 +60,6 @@ async fn main() {
         std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
     // Retry DB connection
->>>>>>> 6c33cd7 (update main.rs debug)
     let pool = loop {
         match PgPool::connect(&database_url).await {
             Ok(pool) => {
@@ -94,13 +82,8 @@ async fn main() {
     let app = Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
-<<<<<<< HEAD
-        .route("/users", get(list_users))
-        .route("/users/:id", delete(delete_user))
-=======
         .route("/users", get(list_users))        // public
         .route("/users/:id", delete(delete_user)) // delete
->>>>>>> 6c33cd7 (update main.rs debug)
         .with_state(AppState { pool, jwt_secret })
         .layer(cors);
 
@@ -171,14 +154,6 @@ async fn register(
     .await
     .map_err(|e| {
         eprintln!("❌ Register error: {}", e);
-<<<<<<< HEAD
-=======
-        if let sqlx::Error::Database(db_err) = &e {
-            if db_err.constraint() == Some("users_name_key") {
-                return StatusCode::CONFLICT;
-            }
-        }
->>>>>>> 6c33cd7 (update main.rs debug)
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -191,11 +166,7 @@ async fn register(
 }
 
 //
-<<<<<<< HEAD
-// LOGIN (FIXED + DEBUG)
-=======
 // LOGIN (JWT)
->>>>>>> 6c33cd7 (update main.rs debug)
 //
 async fn login(
     State(state): State<AppState>,
@@ -263,11 +234,7 @@ async fn login(
         &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
     )
     .map_err(|e| {
-<<<<<<< HEAD
         eprintln!("❌ JWT ERROR: {}", e);
-=======
-        eprintln!("❌ JWT error: {}", e);
->>>>>>> 6c33cd7 (update main.rs debug)
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -280,31 +247,19 @@ async fn login(
 // 🔐 LIST USERS
 //
 async fn list_users(
-    headers: HeaderMap,
+    _headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, StatusCode> {
 
-<<<<<<< HEAD
-    let username = verify_token(&headers, &state.jwt_secret)?;
-
-    if username != "nigel2" {
-        return Err(StatusCode::FORBIDDEN);
-    }
-=======
     println!("📢 list_users called!"); // <- DEBUG LINE
->>>>>>> 6c33cd7 (update main.rs debug)
 
     let rows = sqlx::query("SELECT id, name FROM users")
         .fetch_all(&state.pool)
         .await
-<<<<<<< HEAD
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-=======
         .map_err(|e| {
             eprintln!("❌ List users error: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
->>>>>>> 6c33cd7 (update main.rs debug)
 
     let users = rows
         .into_iter()
@@ -336,14 +291,10 @@ async fn delete_user(
         .bind(id)
         .execute(&state.pool)
         .await
-<<<<<<< HEAD
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-=======
         .map_err(|e| {
             eprintln!("❌ Delete error: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
->>>>>>> 6c33cd7 (update main.rs debug)
 
     Ok(StatusCode::OK)
 }
