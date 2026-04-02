@@ -51,7 +51,7 @@ struct Claims {
 
 #[tokio::main]
 async fn main() {
-    println!("🚀 Starting backend (new version!) 🔥"); // <- DEBUG LINE
+    println!("🚀 Starting backend 🔥");
 
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -82,8 +82,8 @@ async fn main() {
     let app = Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
-        .route("/users", get(list_users))        // public
-        .route("/users/:id", delete(delete_user)) // delete
+        .route("/users", get(list_users))        // 🔐 NOW PROTECTED
+        .route("/users/:id", delete(delete_user)) // 🔐 PROTECTED
         .with_state(AppState { pool, jwt_secret })
         .layer(cors);
 
@@ -186,8 +186,6 @@ async fn login(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    println!("✅ DB QUERY DONE");
-
     let Some(row) = record else {
         println!("❌ USER NOT FOUND");
         return Err(StatusCode::UNAUTHORIZED);
@@ -196,13 +194,8 @@ async fn login(
     let password_hash: String = row.get("password_hash");
     let username: String = row.get("name");
 
-    println!("🔐 VERIFYING PASSWORD");
-
     let parsed_hash = PasswordHash::new(&password_hash)
-        .map_err(|e| {
-            eprintln!("❌ HASH PARSE ERROR: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let argon2 = Argon2::default();
 
@@ -226,17 +219,12 @@ async fn login(
         exp: exp as usize,
     };
 
-    println!("🔑 GENERATING TOKEN");
-
     let token = encode(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
     )
-    .map_err(|e| {
-        eprintln!("❌ JWT ERROR: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     println!("✅ LOGIN SUCCESS");
 
@@ -244,22 +232,25 @@ async fn login(
 }
 
 //
-// 🔐 LIST USERS
+// 🔐 LIST USERS (PROTECTED)
 //
 async fn list_users(
-    _headers: HeaderMap,
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, StatusCode> {
 
-    println!("📢 list_users called!"); // <- DEBUG LINE
+    println!("📢 list_users called!");
+
+    let username = verify_token(&headers, &state.jwt_secret)?;
+
+    if username != "nigel2" {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     let rows = sqlx::query("SELECT id, name FROM users")
         .fetch_all(&state.pool)
         .await
-        .map_err(|e| {
-            eprintln!("❌ List users error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let users = rows
         .into_iter()
@@ -273,7 +264,7 @@ async fn list_users(
 }
 
 //
-// 🔐 DELETE USER
+// 🔐 DELETE USER (PROTECTED)
 //
 async fn delete_user(
     headers: HeaderMap,
@@ -291,10 +282,7 @@ async fn delete_user(
         .bind(id)
         .execute(&state.pool)
         .await
-        .map_err(|e| {
-            eprintln!("❌ Delete error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
 }
