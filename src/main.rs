@@ -51,6 +51,8 @@ struct Claims {
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
+
     println!("🚀 Starting backend 🔥");
 
     let database_url =
