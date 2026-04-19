@@ -156,7 +156,7 @@ async fn register(
     }))
 }
 
-// LOGIN
+// ✅ LOGIN (FIXED)
 async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
@@ -194,9 +194,10 @@ async fn login(
         .unwrap()
         .as_secs() + 86400;
 
-    // ✅ normalize username HERE too
+    let username = username.to_lowercase();
+
     let claims = Claims {
-        sub: username.to_lowercase(),
+        sub: username.clone(),
         exp: exp as usize,
     };
 
@@ -207,7 +208,11 @@ async fn login(
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(json!({ "token": token })))
+    // 🔥 THIS IS THE CRITICAL FIX
+    Ok(Json(json!({
+        "token": token,
+        "username": username
+    })))
 }
 
 // USERS (ADMIN)
