@@ -49,6 +49,19 @@ struct Claims {
     exp: usize,
 }
 
+// ✅ BLOG STRUCTS
+#[derive(Serialize)]
+struct BlogPost {
+    id: i32,
+    username: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct CreatePost {
+    content: String,
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -61,7 +74,6 @@ async fn main() {
     let jwt_secret =
         std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
-    // Retry DB connection
     let pool = loop {
         match PgPool::connect(&database_url).await {
             Ok(pool) => {
@@ -75,7 +87,6 @@ async fn main() {
         }
     };
 
-    // CORS
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -84,8 +95,11 @@ async fn main() {
     let app = Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
-        .route("/users", get(list_users))        // 🔐 NOW PROTECTED
-        .route("/users/:id", delete(delete_user)) // 🔐 PROTECTED
+        .route("/users", get(list_users))
+        .route("/users/:id", delete(delete_user))
+        // ✅ BLOG ROUTES
+        .route("/posts", get(get_posts).post(create_post))
+        .route("/posts/:id", delete(delete_post))
         .with_state(AppState { pool, jwt_secret })
         .layer(cors);
 
@@ -99,7 +113,7 @@ async fn main() {
 }
 
 //
-// 🔐 JWT VERIFY HELPER
+// 🔐 JWT VERIFY
 //
 fn verify_token(headers: &HeaderMap, secret: &str) -> Result<String, StatusCode> {
     let auth_header = headers
@@ -131,17 +145,12 @@ async fn register(
     Json(payload): Json<RegisterPayload>,
 ) -> Result<Json<UserResponse>, StatusCode> {
 
-    println!("📝 REGISTER HIT: {}", payload.email);
-
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
     let password_hash = argon2
         .hash_password(payload.password.as_bytes(), &salt)
-        .map_err(|e| {
-            eprintln!("❌ Hash error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
 
     let record = sqlx::query(
@@ -154,12 +163,7 @@ async fn register(
     .bind(password_hash)
     .fetch_one(&state.pool)
     .await
-    .map_err(|e| {
-        eprintln!("❌ Register error: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    println!("✅ USER REGISTERED");
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(UserResponse {
         id: record.get("id"),
@@ -168,14 +172,12 @@ async fn register(
 }
 
 //
-// LOGIN (JWT)
+// LOGIN
 //
 async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-
-    println!("🔥 LOGIN HIT: {}", payload.email);
 
     let record = sqlx::query(
         "SELECT password_hash, name FROM users WHERE email = $1"
@@ -183,13 +185,9 @@ async fn login(
     .bind(&payload.email)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| {
-        eprintln!("❌ DB ERROR: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let Some(row) = record else {
-        println!("❌ USER NOT FOUND");
         return Err(StatusCode::UNAUTHORIZED);
     };
 
@@ -205,11 +203,8 @@ async fn login(
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .is_err()
     {
-        println!("❌ INVALID PASSWORD");
         return Err(StatusCode::UNAUTHORIZED);
     }
-
-    println!("✅ PASSWORD VERIFIED");
 
     let exp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -228,20 +223,16 @@ async fn login(
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    println!("✅ LOGIN SUCCESS");
-
     Ok(Json(json!({ "token": token })))
 }
 
 //
-// 🔐 LIST USERS (PROTECTED)
+// 🔐 USERS (ADMIN ONLY)
 //
 async fn list_users(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, StatusCode> {
-
-    println!("📢 list_users called!");
 
     let username = verify_token(&headers, &state.jwt_secret)?;
 
@@ -266,7 +257,7 @@ async fn list_users(
 }
 
 //
-// 🔐 DELETE USER (PROTECTED)
+// 🔐 DELETE USER
 //
 async fn delete_user(
     headers: HeaderMap,
@@ -281,6 +272,91 @@ async fn delete_user(
     }
 
     sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
+//
+// BLOG
+//
+
+// GET posts
+async fn get_posts(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<BlogPost>>, StatusCode> {
+
+    let rows = sqlx::query(
+        "SELECT id, username, content FROM posts ORDER BY id DESC"
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let posts = rows
+        .into_iter()
+        .map(|row| BlogPost {
+            id: row.get("id"),
+            username: row.get("username"),
+            content: row.get("content"),
+        })
+        .collect();
+
+    Ok(Json(posts))
+}
+
+// CREATE post
+async fn create_post(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(payload): Json<CreatePost>,
+) -> Result<StatusCode, StatusCode> {
+
+    let username = verify_token(&headers, &state.jwt_secret)?;
+
+    sqlx::query(
+        "INSERT INTO posts (username, content) VALUES ($1, $2)"
+    )
+    .bind(username)
+    .bind(payload.content)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::CREATED)
+}
+
+// DELETE post
+async fn delete_post(
+    headers: HeaderMap,
+    Path(id): Path<i32>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, StatusCode> {
+
+    let username = verify_token(&headers, &state.jwt_secret)?;
+
+    let row = sqlx::query(
+        "SELECT username FROM posts WHERE id = $1"
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let Some(row) = row else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let owner: String = row.get("username");
+
+    if username != "nigel2" && username != owner {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query("DELETE FROM posts WHERE id = $1")
         .bind(id)
         .execute(&state.pool)
         .await
