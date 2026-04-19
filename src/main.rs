@@ -49,7 +49,7 @@ struct Claims {
     exp: usize,
 }
 
-// ✅ BLOG STRUCTS
+// BLOG
 #[derive(Serialize)]
 struct BlogPost {
     id: i32,
@@ -66,8 +66,6 @@ struct CreatePost {
 async fn main() {
     dotenvy::dotenv().ok();
 
-    println!("🚀 Starting backend 🔥");
-
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
@@ -76,14 +74,8 @@ async fn main() {
 
     let pool = loop {
         match PgPool::connect(&database_url).await {
-            Ok(pool) => {
-                println!("✅ Connected to database");
-                break pool;
-            }
-            Err(e) => {
-                eprintln!("❌ DB connection failed, retrying: {}", e);
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
+            Ok(pool) => break pool,
+            Err(_) => tokio::time::sleep(Duration::from_secs(5)).await,
         }
     };
 
@@ -97,7 +89,6 @@ async fn main() {
         .route("/login", post(login))
         .route("/users", get(list_users))
         .route("/users/:id", delete(delete_user))
-        // ✅ BLOG ROUTES
         .route("/posts", get(get_posts).post(create_post))
         .route("/posts/:id", delete(delete_post))
         .with_state(AppState { pool, jwt_secret })
@@ -107,14 +98,10 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("🚀 Server running at http://0.0.0.0:3000");
-
     axum::serve(listener, app).await.unwrap();
 }
 
-//
-// 🔐 JWT VERIFY
-//
+// 🔐 VERIFY JWT
 fn verify_token(headers: &HeaderMap, secret: &str) -> Result<String, StatusCode> {
     let auth_header = headers
         .get("authorization")
@@ -137,9 +124,7 @@ fn verify_token(headers: &HeaderMap, secret: &str) -> Result<String, StatusCode>
     Ok(decoded.claims.sub)
 }
 
-//
 // REGISTER
-//
 async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterPayload>,
@@ -171,9 +156,7 @@ async fn register(
     }))
 }
 
-//
 // LOGIN
-//
 async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
@@ -211,8 +194,9 @@ async fn login(
         .unwrap()
         .as_secs() + 86400;
 
+    // ✅ normalize username HERE too
     let claims = Claims {
-        sub: username,
+        sub: username.to_lowercase(),
         exp: exp as usize,
     };
 
@@ -226,9 +210,7 @@ async fn login(
     Ok(Json(json!({ "token": token })))
 }
 
-//
-// 🔐 USERS (ADMIN ONLY)
-//
+// USERS (ADMIN)
 async fn list_users(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -256,9 +238,7 @@ async fn list_users(
     Ok(Json(users))
 }
 
-//
-// 🔐 DELETE USER
-//
+// DELETE USER
 async fn delete_user(
     headers: HeaderMap,
     Path(id): Path<i32>,
@@ -280,11 +260,7 @@ async fn delete_user(
     Ok(StatusCode::OK)
 }
 
-//
-// BLOG
-//
-
-// GET posts
+// GET POSTS
 async fn get_posts(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<BlogPost>>, StatusCode> {
@@ -308,14 +284,15 @@ async fn get_posts(
     Ok(Json(posts))
 }
 
-// CREATE post
+// CREATE POST
 async fn create_post(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<CreatePost>,
 ) -> Result<StatusCode, StatusCode> {
 
-    let username = verify_token(&headers, &state.jwt_secret)?;
+    let username = verify_token(&headers, &state.jwt_secret)?
+        .to_lowercase();
 
     sqlx::query(
         "INSERT INTO posts (username, content) VALUES ($1, $2)"
@@ -329,14 +306,15 @@ async fn create_post(
     Ok(StatusCode::CREATED)
 }
 
-// DELETE post
+// DELETE POST
 async fn delete_post(
     headers: HeaderMap,
     Path(id): Path<i32>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, StatusCode> {
 
-    let username = verify_token(&headers, &state.jwt_secret)?;
+    let username = verify_token(&headers, &state.jwt_secret)?
+        .to_lowercase();
 
     let row = sqlx::query(
         "SELECT username FROM posts WHERE id = $1"
@@ -350,7 +328,7 @@ async fn delete_post(
         return Err(StatusCode::NOT_FOUND);
     };
 
-    let owner: String = row.get("username");
+    let owner: String = row.get::<String, _>("username").to_lowercase();
 
     if username != "nigel2" && username != owner {
         return Err(StatusCode::FORBIDDEN);
