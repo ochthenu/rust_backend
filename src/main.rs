@@ -66,16 +66,25 @@ struct CreatePost {
 async fn main() {
     dotenvy::dotenv().ok();
 
+    println!("🚀 Starting backend...");
+
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let jwt_secret =
         std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
+    // 🔁 Retry DB connection
     let pool = loop {
         match PgPool::connect(&database_url).await {
-            Ok(pool) => break pool,
-            Err(_) => tokio::time::sleep(Duration::from_secs(5)).await,
+            Ok(pool) => {
+                println!("✅ Connected to database");
+                break pool;
+            }
+            Err(e) => {
+                eprintln!("❌ DB connection failed: {}", e);
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
         }
     };
 
@@ -97,6 +106,8 @@ async fn main() {
     let listener = TcpListener::bind("0.0.0.0:3000")
         .await
         .unwrap();
+
+    println!("🌍 Listening on http://0.0.0.0:3000");
 
     axum::serve(listener, app).await.unwrap();
 }
@@ -130,12 +141,17 @@ async fn register(
     Json(payload): Json<RegisterPayload>,
 ) -> Result<Json<UserResponse>, StatusCode> {
 
+    println!("📝 Register: {}", payload.email);
+
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
     let password_hash = argon2
         .hash_password(payload.password.as_bytes(), &salt)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|e| {
+            eprintln!("❌ Hash error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .to_string();
 
     let record = sqlx::query(
@@ -148,7 +164,12 @@ async fn register(
     .bind(password_hash)
     .fetch_one(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ Register DB error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    println!("✅ User registered");
 
     Ok(Json(UserResponse {
         id: record.get("id"),
@@ -156,11 +177,13 @@ async fn register(
     }))
 }
 
-// ✅ LOGIN (FIXED)
+// LOGIN
 async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+
+    println!("🔐 Login attempt: {}", payload.email);
 
     let record = sqlx::query(
         "SELECT password_hash, name FROM users WHERE email = $1"
@@ -168,9 +191,13 @@ async fn login(
     .bind(&payload.email)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ DB error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let Some(row) = record else {
+        println!("❌ User not found");
         return Err(StatusCode::UNAUTHORIZED);
     };
 
@@ -186,6 +213,7 @@ async fn login(
         .verify_password(payload.password.as_bytes(), &parsed_hash)
         .is_err()
     {
+        println!("❌ Invalid password");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -208,7 +236,8 @@ async fn login(
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // 🔥 THIS IS THE CRITICAL FIX
+    println!("✅ Login success: {}", username);
+
     Ok(Json(json!({
         "token": token,
         "username": username
