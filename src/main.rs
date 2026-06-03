@@ -61,6 +61,9 @@ struct BlogPost {
 struct CreatePost {
     content: String,
 }
+async fn health() -> &'static str {
+    "ok"
+}
 
 #[tokio::main]
 async fn main() {
@@ -94,14 +97,15 @@ async fn main() {
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/register", post(register))
-        .route("/login", post(login))
-        .route("/users", get(list_users))
-        .route("/users/:id", delete(delete_user))
-        .route("/posts", get(get_posts).post(create_post))
-        .route("/posts/:id", delete(delete_post))
-        .with_state(AppState { pool, jwt_secret })
-        .layer(cors);
+    .route("/", get(health))
+    .route("/register", post(register))
+    .route("/login", post(login))
+    .route("/users", get(list_users))
+    .route("/users/:id", delete(delete_user))
+    .route("/posts", get(get_posts).post(create_post))
+    .route("/posts/:id", delete(delete_post))
+    .with_state(AppState { pool, jwt_secret })
+    .layer(cors);
 
 let port = std::env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string());
