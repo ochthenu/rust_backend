@@ -313,7 +313,10 @@ async fn get_posts(
     )
     .fetch_all(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        eprintln!("❌ POSTS ERROR: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let posts = rows
         .into_iter()
