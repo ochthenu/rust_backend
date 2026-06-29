@@ -1,22 +1,22 @@
 use axum::{
-    extract::{State, Json, Path},
-    http::{StatusCode, HeaderMap},
-    routing::{get, post, delete},
+    extract::{Json, Path, State},
+    http::{HeaderMap, StatusCode},
+    routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
-use tokio::net::TcpListener;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::net::TcpListener;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 
-use jsonwebtoken::{encode, decode, EncodingKey, DecodingKey, Header, Validation};
-use tower_http::cors::{CorsLayer, Any};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Clone)]
 struct AppState {
@@ -71,11 +71,9 @@ async fn main() {
 
     println!("🚀 Starting backend...");
 
-    let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    let jwt_secret =
-        std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
     // 🔁 Retry DB connection
     let pool = loop {
@@ -97,24 +95,21 @@ async fn main() {
         .allow_headers(Any);
 
     let app = Router::new()
-    .route("/", get(health))
-    .route("/register", post(register))
-    .route("/login", post(login))
-    .route("/users", get(list_users))
-    .route("/users/:id", delete(delete_user))
-    .route("/posts", get(get_posts).post(create_post))
-    .route("/posts/:id", delete(delete_post))
-    .with_state(AppState { pool, jwt_secret })
-    .layer(cors);
+        .route("/", get(health))
+        .route("/register", post(register))
+        .route("/login", post(login))
+        .route("/users", get(list_users))
+        .route("/users/:id", delete(delete_user))
+        .route("/posts", get(get_posts).post(create_post))
+        .route("/posts/:id", delete(delete_post))
+        .with_state(AppState { pool, jwt_secret })
+        .layer(cors);
 
-let port = std::env::var("PORT")
-        .unwrap_or_else(|_| "3000".to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
 
     let address = format!("0.0.0.0:{port}");
 
-    let listener = TcpListener::bind(&address)
-        .await
-        .unwrap();
+    let listener = TcpListener::bind(&address).await.unwrap();
 
     println!("🌍 Listening on http://{address}");
 
@@ -149,7 +144,6 @@ async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterPayload>,
 ) -> Result<Json<UserResponse>, StatusCode> {
-
     println!("📝 Register: {}", payload.email);
 
     let salt = SaltString::generate(&mut OsRng);
@@ -166,7 +160,7 @@ async fn register(
     let record = sqlx::query(
         "INSERT INTO users (name, email, password_hash)
          VALUES ($1, $2, $3)
-         RETURNING id, name"
+         RETURNING id, name",
     )
     .bind(payload.name)
     .bind(payload.email)
@@ -191,19 +185,16 @@ async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginPayload>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-
     println!("🔐 Login attempt: {}", payload.email);
 
-    let record = sqlx::query(
-        "SELECT password_hash, name FROM users WHERE email = $1"
-    )
-    .bind(&payload.email)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        eprintln!("❌ DB error: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let record = sqlx::query("SELECT password_hash, name FROM users WHERE email = $1")
+        .bind(&payload.email)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            eprintln!("❌ DB error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let Some(row) = record else {
         println!("❌ User not found");
@@ -213,8 +204,8 @@ async fn login(
     let password_hash: String = row.get("password_hash");
     let username: String = row.get("name");
 
-    let parsed_hash = PasswordHash::new(&password_hash)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let parsed_hash =
+        PasswordHash::new(&password_hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let argon2 = Argon2::default();
 
@@ -229,7 +220,8 @@ async fn login(
     let exp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() + 86400;
+        .as_secs()
+        + 86400;
 
     let username = username.to_lowercase();
 
@@ -258,7 +250,6 @@ async fn list_users(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, StatusCode> {
-
     let username = verify_token(&headers, &state.jwt_secret)?;
 
     if username != "nigel2" {
@@ -287,7 +278,6 @@ async fn delete_user(
     Path(id): Path<i32>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, StatusCode> {
-
     let username = verify_token(&headers, &state.jwt_secret)?;
 
     if username != "nigel2" {
@@ -304,19 +294,14 @@ async fn delete_user(
 }
 
 // GET POSTS
-async fn get_posts(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<BlogPost>>, StatusCode> {
-
-    let rows = sqlx::query(
-        "SELECT id, username, content FROM posts ORDER BY id DESC"
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        eprintln!("❌ POSTS ERROR: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+async fn get_posts(State(state): State<AppState>) -> Result<Json<Vec<BlogPost>>, StatusCode> {
+    let rows = sqlx::query("SELECT id, username, content FROM posts ORDER BY id DESC")
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| {
+            eprintln!("❌ POSTS ERROR: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let posts = rows
         .into_iter()
@@ -336,18 +321,14 @@ async fn create_post(
     State(state): State<AppState>,
     Json(payload): Json<CreatePost>,
 ) -> Result<StatusCode, StatusCode> {
+    let username = verify_token(&headers, &state.jwt_secret)?.to_lowercase();
 
-    let username = verify_token(&headers, &state.jwt_secret)?
-        .to_lowercase();
-
-    sqlx::query(
-        "INSERT INTO posts (username, content) VALUES ($1, $2)"
-    )
-    .bind(username)
-    .bind(payload.content)
-    .execute(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("INSERT INTO posts (username, content) VALUES ($1, $2)")
+        .bind(username)
+        .bind(payload.content)
+        .execute(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::CREATED)
 }
@@ -358,17 +339,13 @@ async fn delete_post(
     Path(id): Path<i32>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, StatusCode> {
+    let username = verify_token(&headers, &state.jwt_secret)?.to_lowercase();
 
-    let username = verify_token(&headers, &state.jwt_secret)?
-        .to_lowercase();
-
-    let row = sqlx::query(
-        "SELECT username FROM posts WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row = sqlx::query("SELECT username FROM posts WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let Some(row) = row else {
         return Err(StatusCode::NOT_FOUND);

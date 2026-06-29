@@ -26,3 +26,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 jsonwebtoken = "9"
 
 dotenvy = "0.15"
+
+uuid = { version = "1", features = ["v4"] }
+
+image = "0.25"
