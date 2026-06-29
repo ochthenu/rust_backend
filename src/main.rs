@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Multipart, Path, State},
     http::{HeaderMap, StatusCode},
     routing::{delete, get, post},
     Router,
@@ -7,8 +7,11 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::fs;
 use tokio::net::TcpListener;
+use tower_http::services::ServeDir;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -102,6 +105,9 @@ async fn main() {
         .route("/users/:id", delete(delete_user))
         .route("/posts", get(get_posts).post(create_post))
         .route("/posts/:id", delete(delete_post))
+        .route("/upload", post(upload_image))
+        // 👇 Add this
+        .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(AppState { pool, jwt_secret })
         .layer(cors);
 
@@ -364,4 +370,7 @@ async fn delete_post(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
+}
+async fn upload_image(_multipart: Multipart) -> Result<String, StatusCode> {
+    Ok("Upload endpoint reached".to_string())
 }
