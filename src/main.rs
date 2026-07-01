@@ -371,6 +371,8 @@ async fn delete_post(
 
     Ok(StatusCode::OK)
 }
+
+// UPLOAD IMAGES
 async fn upload_image(mut multipart: Multipart) -> Result<String, StatusCode> {
     let Some(field) = multipart
         .next_field()
