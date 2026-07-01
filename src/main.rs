@@ -371,6 +371,27 @@ async fn delete_post(
 
     Ok(StatusCode::OK)
 }
-async fn upload_image(_multipart: Multipart) -> Result<String, StatusCode> {
-    Ok("Upload endpoint reached".to_string())
+async fn upload_image(mut multipart: Multipart) -> Result<String, StatusCode> {
+    let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+    else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+
+    let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let filename = format!("{}.jpg", uuid::Uuid::new_v4());
+
+    let mut path = PathBuf::from("uploads");
+    path.push(&filename);
+
+    fs::write(&path, data)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    println!("Saved {:?}", path);
+
+    Ok(format!("/uploads/{}", filename))
 }
