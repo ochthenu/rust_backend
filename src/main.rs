@@ -58,11 +58,13 @@ struct BlogPost {
     id: i32,
     username: String,
     content: String,
+    image_url: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct CreatePost {
     content: String,
+    image_url: Option<String>,
 }
 async fn health() -> &'static str {
     "ok"
@@ -301,7 +303,7 @@ async fn delete_user(
 
 // GET POSTS
 async fn get_posts(State(state): State<AppState>) -> Result<Json<Vec<BlogPost>>, StatusCode> {
-    let rows = sqlx::query("SELECT id, username, content FROM posts ORDER BY id DESC")
+    let rows = sqlx::query("SELECT id, username, content, image_url FROM posts ORDER BY id DESC")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| {
@@ -315,6 +317,7 @@ async fn get_posts(State(state): State<AppState>) -> Result<Json<Vec<BlogPost>>,
             id: row.get("id"),
             username: row.get("username"),
             content: row.get("content"),
+            image_url: row.get("image_url"),
         })
         .collect();
 
@@ -329,9 +332,10 @@ async fn create_post(
 ) -> Result<StatusCode, StatusCode> {
     let username = verify_token(&headers, &state.jwt_secret)?.to_lowercase();
 
-    sqlx::query("INSERT INTO posts (username, content) VALUES ($1, $2)")
+    sqlx::query("INSERT INTO posts (username, content, image_url) VALUES ($1, $2, $3)")
         .bind(username)
         .bind(payload.content)
+        .bind(payload.image_url)
         .execute(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
