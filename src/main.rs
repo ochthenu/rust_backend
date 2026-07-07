@@ -393,9 +393,12 @@ async fn upload_image(mut multipart: Multipart) -> Result<String, StatusCode> {
     let mut path = PathBuf::from("uploads");
     path.push(&filename);
 
-    fs::write(&path, data)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    println!("Saving upload to {:?}", path);
+
+    if let Err(err) = fs::write(&path, data).await {
+        eprintln!("❌ Failed to save upload: {}", err);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     println!("Saved {:?}", path);
 
