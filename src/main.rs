@@ -390,7 +390,14 @@ async fn upload_image(mut multipart: Multipart) -> Result<String, StatusCode> {
 
     let filename = format!("{}.jpg", uuid::Uuid::new_v4());
 
-    let mut path = PathBuf::from("uploads");
+    let upload_dir = PathBuf::from("uploads");
+
+    if let Err(err) = fs::create_dir_all(&upload_dir).await {
+        eprintln!("❌ Failed to create uploads directory: {}", err);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let mut path = upload_dir;
     path.push(&filename);
 
     println!("Saving upload to {:?}", path);
