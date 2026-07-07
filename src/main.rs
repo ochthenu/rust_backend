@@ -396,6 +396,9 @@ async fn upload_image(mut multipart: Multipart) -> Result<String, StatusCode> {
         eprintln!("❌ Failed to create uploads directory: {}", err);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
+    println!("Current directory: {:?}", std::env::current_dir());
+    println!("Upload directory: {:?}", upload_dir);
+    println!("Exists? {}", upload_dir.exists());
 
     let mut path = upload_dir;
     path.push(&filename);
