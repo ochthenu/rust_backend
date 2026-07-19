@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Json, Multipart, Path, State},
+    extract::{Json, Path, State},
     http::{HeaderMap, StatusCode},
     routing::{delete, get, post},
     Router,
@@ -7,9 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
-use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::fs;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 
@@ -20,6 +18,8 @@ use argon2::{
 
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use tower_http::cors::{Any, CorsLayer};
+
+mod b2;
 
 #[derive(Clone)]
 struct AppState {
@@ -107,7 +107,7 @@ async fn main() {
         .route("/users/:id", delete(delete_user))
         .route("/posts", get(get_posts).post(create_post))
         .route("/posts/:id", delete(delete_post))
-        .route("/upload", post(upload_image))
+        .route("/upload", post(b2::upload_image))
         // 👇 Add this
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(AppState { pool, jwt_secret })
@@ -374,43 +374,4 @@ async fn delete_post(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
-}
-
-// UPLOAD IMAGES
-async fn upload_image(mut multipart: Multipart) -> Result<String, StatusCode> {
-    let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?
-    else {
-        return Err(StatusCode::BAD_REQUEST);
-    };
-
-    let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    let filename = format!("{}.jpg", uuid::Uuid::new_v4());
-
-    let upload_dir = PathBuf::from("uploads");
-
-    if let Err(err) = fs::create_dir_all(&upload_dir).await {
-        eprintln!("❌ Failed to create uploads directory: {}", err);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    println!("Current directory: {:?}", std::env::current_dir());
-    println!("Upload directory: {:?}", upload_dir);
-    println!("Exists? {}", upload_dir.exists());
-
-    let mut path = upload_dir;
-    path.push(&filename);
-
-    println!("Saving upload to {:?}", path);
-
-    if let Err(err) = fs::write(&path, data).await {
-        eprintln!("❌ Failed to save upload: {}", err);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    println!("Saved {:?}", path);
-
-    Ok(format!("/uploads/{}", filename))
 }
