@@ -20,6 +20,7 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use tower_http::cors::{Any, CorsLayer};
 
 mod b2;
+mod email;
 
 #[derive(Clone)]
 struct AppState {
@@ -333,12 +334,19 @@ async fn create_post(
     let username = verify_token(&headers, &state.jwt_secret)?.to_lowercase();
 
     sqlx::query("INSERT INTO posts (username, content, image_url) VALUES ($1, $2, $3)")
-        .bind(username)
-        .bind(payload.content)
-        .bind(payload.image_url)
+        .bind(&username)
+        .bind(&payload.content)
+        .bind(&payload.image_url)
         .execute(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if let Err(err) =
+        email::send_new_post_notification(&username, &payload.content, payload.image_url.as_deref())
+            .await
+    {
+        eprintln!("Failed to send notification email: {}", err);
+    }
 
     Ok(StatusCode::CREATED)
 }
