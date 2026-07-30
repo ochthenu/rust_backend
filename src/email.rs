@@ -3,14 +3,6 @@ use serde::Serialize;
 use std::env;
 
 #[derive(Serialize)]
-struct EmailRequest {
-    from: String,
-    to: Vec<String>,
-    subject: String,
-    text: String,
-}
-
-#[derive(Serialize)]
 struct ResendRequest {
     #[serde(rename = "from")]
     from: String,

@@ -341,21 +341,11 @@ async fn create_post(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    println!("📧 Calling send_new_post_notification...");
-
-    match email::send_new_post_notification(
-        &username,
-        &payload.content,
-        payload.image_url.as_deref(),
-    )
-    .await
+    if let Err(err) =
+        email::send_new_post_notification(&username, &payload.content, payload.image_url.as_deref())
+            .await
     {
-        Ok(_) => {
-            println!("✅ Notification email sent successfully");
-        }
-        Err(err) => {
-            println!("❌ Failed to send notification email: {}", err);
-        }
+        eprintln!("Failed to send notification email: {}", err);
     }
 
     Ok(StatusCode::CREATED)

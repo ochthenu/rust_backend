@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 struct AuthorizeResponse {
+    #[allow(dead_code)]
     #[serde(rename = "accountId")]
     account_id: String,
 
