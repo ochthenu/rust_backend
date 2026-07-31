@@ -149,8 +149,13 @@ impl B2Client {
         format!("{:x}", hasher.finalize())
     }
 
-    fn new_filename() -> String {
-        format!("{}.jpg", Uuid::new_v4())
+    fn new_filename(original: &str) -> String {
+        let ext = std::path::Path::new(original)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg");
+
+        format!("{}.{}", Uuid::new_v4(), ext)
     }
 
     async fn upload_file(
@@ -206,6 +211,8 @@ pub async fn upload_image(
         return Err(StatusCode::BAD_REQUEST);
     };
 
+    let original_name = field.file_name().unwrap_or("image").to_string();
+
     let bytes = field
         .bytes()
         .await
@@ -218,7 +225,7 @@ pub async fn upload_image(
 
     let upload = client.get_upload_url(&auth).await?;
 
-    let filename = B2Client::new_filename();
+    let filename = B2Client::new_filename(&original_name);
 
     let url = client.upload_file(&auth, &upload, &filename, bytes).await?;
 
