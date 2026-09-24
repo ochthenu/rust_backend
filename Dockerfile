@@ -1,5 +1,5 @@
 # 1) Build stage
-FROM rust:1.94-bullseye AS builder
+FROM rust:1.94-bookworm AS builder
 
 WORKDIR /app
 
@@ -9,14 +9,14 @@ RUN cargo clean
 RUN cargo build --release
 
 
-# 2) Runtime stage (MATCH bullseye)
-FROM debian:bullseye-slim
+# 2) Runtime stage
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl1.1 \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/axum_backend /usr/local/bin/axum_backend
