@@ -25,7 +25,7 @@ pub async fn send_new_post_notification(
     let api_key = env::var("RESEND_API_KEY")?;
 
     let body = ResendRequest {
-        from: "Nozawana <onboarding@resend.dev>".to_string(),
+        from: "youmaydreamflowers <noreply@youmaydreamflowers.online>".to_string(),
         to: vec!["youmaydream234@gmail.com".to_string()],
         subject: "New blog post".to_string(),
         text: format!(
