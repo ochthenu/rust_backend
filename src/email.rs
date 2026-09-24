@@ -26,7 +26,7 @@ pub async fn send_new_post_notification(
 
     let body = ResendRequest {
         from: "Nozawana <onboarding@resend.dev>".to_string(),
-        to: vec!["finniemcansh@gmail.com".to_string()],
+        to: vec!["youmaydream234@gmail.com".to_string()],
         subject: "New blog post".to_string(),
         text: format!(
             "User: {}\n\n{}\n\nImage: {}",
